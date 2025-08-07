@@ -1,0 +1,161 @@
+# Copyright 2025 Google Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# Person 1. 2 drive action. 1 network action. 1 bash action.
+context {
+  feature {
+    key: "p"
+    value {
+      bytes_list { value: "person1" }
+    }
+  }
+  feature {
+    key: "hr/cost_center"
+    value {
+      bytes_list { value: "ORD" value: "SYD" }
+    }
+  }
+  feature {
+    key: "code/reviewer_f/t"
+    value {
+      bytes_list { value: "reviewer1" value: "reviewer2" }
+    }
+  }
+  feature {
+    key: "code/reviewer_f/w"
+    value {
+      float_list { value: 1 value: 1 }
+    }
+  }
+  feature {
+    key: "calendar/mtg"
+    value {
+      float_list { value: 1 value: 2 }
+    }
+  }
+}
+feature_lists {
+  feature_list {
+    key: "drive/title"
+    value {
+      feature { bytes_list { value: "this" value: "doc" } }
+      feature { bytes_list { value: "other" value: "doc" } }
+    }
+  }
+  feature_list {
+    key: "drive/owner"
+    value {
+      feature { bytes_list { value: "person1" } }
+      feature { bytes_list { value: "person2" } }
+    }
+  }
+  feature_list {
+    key: "bash/cmd"
+    value {
+      feature { float_list { value: 1 value: 2 } }
+    }
+  }
+  feature_list {
+    key: "network/prin/t"
+    value {
+      feature { bytes_list { value: "up4" value: "up5" } }
+    }
+  }
+  feature_list {
+    key: "network/prin/w"
+    value {
+      feature { float_list { value: 1 value: 0 } }
+    }
+  }
+}
+
+# Person 2. Context only.
+context {
+  feature {
+    key: "p"
+    value {
+      bytes_list { value: "person3" }
+    }
+  }
+  feature {
+    key: "hr/cost_center"
+    value {
+      bytes_list { value: "ORD" value: "NYC" }
+    }
+  }
+  feature {
+    key: "calendar/mtg"
+    value {
+      float_list { value: 1 value: 2 }
+    }
+  }
+}
+
+# Person 3. 3 network action and 2 bash action.
+context {
+  feature {
+    key: "p"
+    value {
+      bytes_list { value: "person2" }
+    }
+  }
+  feature {
+    key: "hr/cost_center"
+    value {
+      bytes_list { value: "CDG" value: "SYD" }
+    }
+  }
+  feature {
+    key: "code/reviewer_f/t"
+    value {
+      bytes_list { value: "reviewer1" value: "reviewer3" value: "reviewer8" }
+    }
+  }
+  feature {
+    key: "code/reviewer_f/w"
+    value {
+      float_list { value: 1 value: 2 value: 2 }
+    }
+  }
+  feature {
+    key: "calendar/mtg"
+    value {
+      float_list { value: 3 value: 4 }
+    }
+  }
+}
+feature_lists {
+  feature_list {
+    key: "bash/cmd"
+    value {
+      feature { float_list { value: 3 value: 4 } }
+      feature { float_list { value: 5 value: 6 } }
+    }
+  }
+  feature_list {
+    key: "network/prin/t"
+    value {
+      feature { bytes_list { value: "up1" } }
+      feature { bytes_list { value: "up2" value: "up3" value: "up5" } }
+      feature { bytes_list {} }
+    }
+  }
+  feature_list {
+    key: "network/prin/w"
+    value {
+      feature { float_list { value: 1 } }
+      feature { float_list { value: 2 value: 3 value: 1 } }
+      feature { float_list {} }
+    }
+  }
+}

@@ -1,0 +1,57 @@
+// Copyright 2025 Google Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package facade;
+
+import "protos/timestamp.proto";
+
+// A Facade action represents a single resource access by a principal entity,
+// which Facade can read in and score. For example, an action could be
+// document document access by an employee.
+//
+// Actions must specify the resource and principal via IDs that are stable over
+// time. Actions are featurized according to an ActionConfig that matches the
+// type field.
+message Action {
+  // Identifies what kind of action this is (eg, "table" or "document"). Must match
+  // an action type in the directive. Must match [\w\d-_]+.
+  string type = 1;
+
+  // ID that must be globally unique among all actions and across time. Usually
+  // derived from a unique identifier to allow for reverse lookup.
+  bytes id = 2;
+
+  // Identifier of the resource in the action (eg, a document ID).
+  // Used for identifying the action embedding produced by the model.
+  string resource_id = 3;
+
+  // Identifier of who did this action; used to join this action to a
+  // principal's context information at the time of the event.
+  // If the principal does not match any known contexts, the action will be
+  // dropped.
+  string principal = 4;
+
+  // The time the action happened.
+  Timestamp occurred_at = 5;
+
+  // Key used for history featurization, if a history config is given for the
+  // action type in the directive.
+  //
+  // History featurization looks at all principals that have previously touched
+  // the resource and creates action features based on the context features of
+  // these principals.
+  bytes history_key = 6;
+}

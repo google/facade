@@ -1,0 +1,80 @@
+# Copyright 2025 Google Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+principal_feature_name: "p"
+context_architecture {
+  concatenate_then_snn {
+    segment_reductions {
+      token_feature_name: "hr/cost_center"
+      token_embedding_name: "context/cost_center"
+    }
+    segment_reductions {
+      token_feature_name: "code/reviewer_f/t"
+      intensity_feature_name: "code/reviewer_f/w"
+      token_embedding_name: "context/reviewer"
+    }
+    fixed_size_dense_features {
+      feature_name: "calendar/mtg"
+      size: 2
+    }
+  }
+}
+
+action_name_to_architecture: [
+  {
+    key: "drive"
+    value {
+      concatenate_then_snn {
+        segment_reductions {
+          token_feature_name: "drive/title"
+          token_embedding_name: "action/title"
+        }
+        segment_reductions {
+          token_feature_name: "drive/owner"
+          token_embedding_name: "action/owner"
+        }
+      }
+    }
+  },
+  {
+    key: "network"
+    value {
+      concatenate_then_snn {
+        segment_reductions {
+          token_feature_name: "network/prin/t"
+          intensity_feature_name: "network/prin/w"
+          token_embedding_name: "action/principal"
+        }
+      }
+    }
+  },
+  {
+    key: "bash"
+    value {
+      concatenate_then_snn {
+        fixed_size_dense_features {
+          feature_name: "bash/cmd"
+          size: 2
+        }
+      }
+    }
+  }
+]
+
+token_embedding_name_to_config: [
+  { key: "context/cost_center" value {} },
+  { key: "context/reviewer" value {} },
+  { key: "action/title" value {} },
+  { key: "action/owner" value {} },
+  { key: "action/principal" value {} }
+]

@@ -1,0 +1,114 @@
+// Copyright 2025 Google Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package facade;
+
+import "protos/timestamp.proto";
+
+// A Facade context represents information about a particular principal at a
+// point in time. For example, a principal could be an employee or a role account.
+message Context {
+  // Identifies what kind of context info is provided (eg, "email" or
+  // "calendar"). Must match a context type in the config. Must match [\w\d-_]+.
+  string type = 1;
+
+  // The principal for whom this context information holds. This is used to join
+  // data from multiple context sources and to join with actions.
+  string principal = 2;
+
+  // The earliest time that the data is valid. Facade will always try to use
+  // the freshest context data for an action, but won't use context data
+  // posterior to the action.
+  Timestamp valid_from = 3;
+
+  // Peer featurization creates a graph of relationships between principals and
+  // extracts feature information from this graph. Edges are created between
+  // peers that have the same attributes, defined here.
+  repeated PeerAttribute peer_attributes = 4;
+}
+
+// Attribute for a single kind of peer featurization for a principal. This
+// stores the edge of the principal with respect to the attribute that connects
+// other principals that share the same attribute.
+//
+// Example 1:
+// To featurize peers who work on the same projects, a peer attribute can
+// simply specify the project_id and Facade will generate all project peers as
+// a feature. For example:
+//   attribute_name : "project_id"
+//   attribute_value: 123456
+//
+// Example 2:
+// There is sometimes valuable information in the precise relationship between
+// the attribute_value and the user. For instance, code reviews have a single
+// author and one or more reviewers. This can be modeled with the `direction`
+// field. Facade will generate two sets of peers: the reviewers and the
+// reviewees w.r.t. the user. For example:
+//   attribute_name: "cl_number"
+//   attribute_value: 123456
+//   direction: D_FORWARD
+//
+// Here, by arbitrary convention but consistent throughout the data for this
+// attribute_name, D_FORWARD is taken to mean author, D_BACKWARD reviewer.
+message PeerAttribute {
+  // The type determines which attribute is used to connect peers. For example,
+  // "code_review" or "calendar_invite".
+  string name = 1;
+
+  // Value used to create edges between principals in the peer graph. Typically,
+  // principals that share the same attribute_value are connected.
+  // For example, the attribute value of "code_review" peers could be the change
+  // number. For "calendar_invite" peers it could be the meeting ID.
+  bytes value = 2;
+
+  // The relationship between the principal and the attribute. This can be
+  // left unset if all attribute_value-principal relations are of the same
+  // nature, for example between meetings and attendees. In this case, Facade
+  // will generate a single set of peers at featurization time: those accessible
+  // by a 2-hop traversal in the meetings-attendees graph. These would
+  // intuitively represent "people this user has meetings with".
+  //
+  // Direction can be used for finer-grain modeling. For example, in code
+  // review contexts, we can distinguish between authors and reviewers
+  // by setting `direction` appropriately. In this case, attribute_values are change
+  // numbers. In the users to change_number graph, users connect to changes they
+  // authored with D_FORWARD edges, and to changes they reviewed with D_BACKWARD edges.
+  // Facade will generate two sets of peers at featurization time: those accessible by
+  // traversing 2 hops forwards and those accessible by traversing 2 hops
+  // backwards. The peers selected by the forward and backward traversals are,
+  // respectively, "peers who review this user's CLs" and "peers who's CLs
+  // this user reviews".
+  //
+  // If configured to be undirected, all `direction` must be D_UNSET. If
+  // configured to be directed, then they must be either D_FORWARD or
+  // D_BACKWARD.
+  enum Direction {
+    D_UNSET = 0;
+    D_FORWARD = 1;
+    D_BACKWARD = 2;
+  }
+
+  Direction direction = 3;
+
+  // A non-negative weight. Zero-weighted edges are effectively dropped.
+  float weight = 4;
+
+  // Timestamp of the attribute relevant to peer graph. This field can be
+  // used to downweight an attribute that was relevant to the principal a long
+  // time ago. If unset, valid_from is used to set this value.
+  // Example: the meeting end time of a calendar invite.
+  Timestamp time = 5;
+}

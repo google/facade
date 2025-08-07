@@ -1,0 +1,97 @@
+// Copyright 2025 Google Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package facade.internal;
+
+import "protos/timestamp.proto";
+
+// Represents a set of actions performed in a context which have been collected
+// together, along with the context's featurization. We collect actions together
+// under the same context for performance, to avoid multiple-storing the same
+// context information.
+message ContextualizedActions {
+  string principal = 3;
+
+  // Featurization of the context across all context sources. This is temporally
+  // consistent with the actions (ie, the context features were computed
+  // before the first action).
+  FeaturizedContext context = 1;
+
+  // Holds the featurization for action events that were performed under the
+  // context, grouped by action source.
+  repeated FeaturizedActionsBySource actions = 2;
+}
+
+// Featurization of a context at a particular point in time, across all context
+// sources.
+message FeaturizedContext {
+  // Features organized by context source type. Key will match a context source
+  // in the directive.
+  repeated ContextSourceFeatures features_per_source = 1;
+
+  // Context features are only valid for actions which occurred after this time.
+  // This is the max valid_from timestamp in the contexts that form this
+  // FeaturizedContext.
+  Timestamp valid_from = 2;
+}
+
+// Featurization of a group of actions which all belong to the same action
+// source.
+message FeaturizedActionsBySource {
+  // What action source the actions came from. Matches the type name of an
+  // action source in the directive.
+  string source_type = 1;
+
+  // The actions and their features.
+  repeated FeaturizedAction actions = 2;
+}
+
+// Featurization for a single action.
+message FeaturizedAction {
+  // Matches Action.id.
+  bytes id = 1;
+
+  // Matches Action.resource_id.
+  string resource_id = 4;
+  Timestamp occurred_at = 2;
+  repeated Feature features = 3;
+}
+
+// Context features for a single context source.
+message ContextSourceFeatures {
+  // What context source produced these features. Matches the type name of a
+  // context source in the directive.
+  string source_type = 1;
+  repeated Feature features = 2;
+}
+
+// A single feature used for actions or contexts.
+message Feature {
+  string name = 1;
+
+  oneof type {
+    WeightedTokens bag_of_weighted_words = 2;
+  }
+}
+
+message WeightedTokens {
+  repeated WeightedToken tokens = 1;
+}
+
+message WeightedToken {
+  bytes token = 1;
+  float weight = 2;
+}

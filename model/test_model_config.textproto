@@ -1,0 +1,144 @@
+# Copyright 2025 Google Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+embedding_dims: 10
+scoring_function: SF_DOT
+action_embeddings_transformations: [TR_SOFTPLUS]
+context_embeddings_transformations: [TR_SOFTPLUS]
+training_hyperparameters {
+  batch_size: 3
+  training_examples: 3000
+  dropout_tokens: 0.33
+  dropout_neurons: 0.33
+  learning_rate_schedule {
+    one_cycle {
+      peak_learning_rate: 0.04
+      learning_rate_rampup_factor: 25.0
+      learning_rate_rampdown_factor: 10000.0
+      rampup: 0.3
+      interpolation: I_COSINE
+    }
+  }
+  optimizer {
+    sgd {
+      global_clipnorm: 100.0
+    }
+  }
+  loss_function {
+    pairwise_huber {
+      soft_margin: 1.0
+      hard_margin: 1.0
+      norm_push: 1.0
+      lse_scale: 0.0
+    }
+  }
+  synthetic_positives_strategy {
+    random_sample_within_minibatch {
+      contrastive_scores_per_query: 10
+      positive_instances_weight_factor: 1.0
+    }
+  }
+  action_name_to_loss_weight: [
+    { key: "network" value: 0.3 },
+    { key: "drive" value: 0.3 },
+    { key: "bash" value: 0.3 }
+  ]
+  commensurable_scores_across_actions: false
+  evaluation {
+    examples_per_training_epoch: 1000
+    batch_size: 50
+    examples_per_evaluation_epoch: 500
+    metrics_fpr_thresholds: [1.0, 0.1]
+    synthetic_positives {
+      contrastive_scores_per_query: 1
+      positive_instances_weight_factor: 1.0
+    }
+  }
+}
+principal_feature_name: "p"
+context_architecture {
+  concatenate_then_snn {
+    segment_reductions {
+      token_feature_name: "hr/cost_center"
+      token_embedding_name: "context/cost_center"
+      segment_weight_scaling: WS_IDENTITY
+      segment_weight_normalization: WN_L2
+    }
+    segment_reductions {
+      token_feature_name: "code/reviewer_f/t"
+      intensity_feature_name: "code/reviewer_f/w"
+      token_embedding_name: "context/reviewer"
+      segment_weight_scaling: WS_IDENTITY
+      segment_weight_normalization: WN_L2
+    }
+    fixed_size_dense_features {
+      feature_name: "calendar/mtg"
+      size: 2
+    }
+  }
+}
+
+action_name_to_architecture: [
+  {
+    key: "drive"
+    value {
+      concatenate_then_snn {
+        segment_reductions {
+          token_feature_name: "drive/title"
+          token_embedding_name: "action/title"
+          segment_weight_scaling: WS_IDENTITY
+          segment_weight_normalization: WN_L2
+        }
+        segment_reductions {
+          token_feature_name: "drive/owner"
+          token_embedding_name: "action/owner"
+          segment_weight_scaling: WS_IDENTITY
+          segment_weight_normalization: WN_L2
+        }
+      }
+    }
+  },
+  {
+    key: "network"
+    value {
+      concatenate_then_snn {
+        segment_reductions {
+          token_feature_name: "network/prin/t"
+          intensity_feature_name: "network/prin/w"
+          token_embedding_name: "action/principal"
+          segment_weight_scaling: WS_IDENTITY
+          segment_weight_normalization: WN_L2
+        }
+      }
+    }
+  },
+  {
+    key: "bash"
+    value {
+      concatenate_then_snn {
+        fixed_size_dense_features {
+          feature_name: "bash/cmd"
+          size: 2
+        }
+      }
+    }
+  }
+]
+
+token_embedding_name_to_config: [
+  { key: "context/cost_center" value {} },
+  { key: "context/reviewer" value {} },
+  { key: "action/title" value {} },
+  { key: "action/owner" value {} },
+  { key: "action/principal" value {} }
+]

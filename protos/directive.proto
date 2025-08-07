@@ -1,0 +1,74 @@
+// Copyright 2025 Google Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package facade;
+
+import "protos/duration.proto";
+import "protos/action_source_config.proto";
+import "protos/context_source_config.proto";
+
+// Represents a configuration for a Facade model and its featurization. The
+// directive has a 1-to-1 association with a model version: when the directive
+// changes a new model must be trained.
+message Directive {
+  // Which model version this is. Facade keeps track of which model produced
+  // results using this value, and so model versions should not be reused.
+  // Prefer to increment this by 1 for each release so that different version
+  // numbers are easy to compare.
+  int32 model_version = 1;
+
+  // Data location and configuration for each action source.
+  repeated ActionSourceConfig action_sources = 2;
+
+  // Data location and configuration for each context source.
+  repeated ContextSourceConfig context_sources = 3;
+
+  // Parameters for creating dataset from contexts and actions.
+  message DatasetParameters {
+    // Context featurization and final outputs are organized at this period.
+    // If this is 2h, collected contexts are processed to produce featurization
+    // for each principal at every 2h. Also, the model generates final outputs
+    // at every 2h, aligned with the context's featurization times.
+    Duration snapshot_period = 1;
+
+    // Offset relative to midnight UTC, from which snapshot times are generated.
+    // If this is 3h and snapshot_period is 2h, snapshot times start at 3am and
+    // are generated every 2h up to the end time of the dataset. Typically, this
+    // is zero duration unless there is a compelling reason to do so, e.g.,
+    // snapshot_period must be 2h but the snapshot times must be evaluated at
+    // odd hours.
+    Duration snapshot_time_offset = 2;
+
+    // Maximum number of actions that one ContextualizedActions proto holds. If
+    // there are many actions for one context, the pipeline generates multiple
+    // ContextualizedActions each of which contains actions up to this value.
+    // Setting this value to a too large number may fail the pipeline due to the
+    // proto serialization failure. Also, setting this value to a too small
+    // number makes the pipeline inefficient as it copies the context features
+    // each time.
+    // Must be positive.
+    int32 max_num_actions_per_contextualized_actions = 3;
+
+    // Maximum number of ContextualizedActions protos that one principal can
+    // hold per snapshot time. If the number of ContexualizedActions exceeds the
+    // limit, the pipeline drops the rest non-deterministically.
+    // Default zero or negative value means no limit (i.e., all are kept).
+    // This is not applicable to inference mode which always keeps all.
+    int32 max_num_contextualized_actions_per_principal_snapshot = 4;
+  }
+
+  DatasetParameters dataset_parameters = 4;
+}

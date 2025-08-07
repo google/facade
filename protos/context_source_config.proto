@@ -1,0 +1,164 @@
+// Copyright 2025 Google Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package facade;
+
+import "protos/duration.proto";
+
+// Controls how to featurize context protos.
+message ContextSourceConfig {
+  // What kind of context to configure (eg, "code_review" or "calendar"). Matched with
+  // the 'type' field in the context proto, Context.type.
+  // Must match [\w\d-_]+.
+  string type = 1;
+
+  // Up to this duration of past data is used when constructing a context at any
+  // given time. A context at time T is formed by a collection of Context
+  // data whose Context.valid_from fall within [T - context_lookback, T).
+  // Must be positive. If no context is available for [T - context_lookback, T),
+  // no featurized context from this source is emitted for time T.
+  Duration context_lookback = 2;
+
+  // Peer featurization. Configuration for a graph that connects principals to
+  // other peers and extracts the final featurization of the principal by its
+  // peers.
+  repeated PeerFeatureConfig peer_feature_configs = 3;
+}
+
+// A principal may be featurized by other principals, which we call "peers".
+// To featurize a principal by other principals, we form a "social graph" that
+// connects principals with other principals with weights which quantify the
+// "connectedness" of a pair of principals. The social graph is a function of a
+// low-level graph that is formed by connecting principals via attributes from
+// context protos. peer_attribute_graph_type configures the low-level graph.
+message PeerFeatureConfig {
+  // Name of the attribute for the graph. Must match one of PeerAttribute.name
+  // in the Context proto.
+  string name = 1;
+
+  // Maximum number of peers to represent each principal. When there are more
+  // than max_peers peers, selects max_peers peers by highest weights.
+  int32 max_peers = 2;
+
+  // How to aggregate attribute values by attribute names when there are
+  // multiple contexts in [T - context_lookback, T) sharing the same names.
+  // After aggregation, EdgeWeightingMethod deduplicates repeated attribute
+  // values.
+  enum AttributeValueAggregationMethod {
+    // Error.
+    AGG_UNSPECIFIED = 0;
+
+    // Accumulates all values. At time T, from all contexts in
+    // [T - context_lookback, T), keeps all attribute values. For example, for
+    // PeerFeatureConfig.name = "cl_number" attributes, it keeps all cl number
+    // values in featurization.
+    AGG_ACCUMULATE = 1;
+
+    // Keeps the latest available value. At time T, from all contexts in
+    // [T - context_lookback, T), for a given feature name, keeps the latest
+    // value and weight seen. For example, PeerFeatureConfig.name =
+    // "direct_manager" feature, it only keeps the latest information of the
+    // direct manager and discards everything about direct manager in the past
+    // even if they are present in [T - context_lookback, T). Raises an error if
+    // there are multiple attribute values at the same time.
+    AGG_LATEST = 2;
+  }
+
+  AttributeValueAggregationMethod aggregation_method = 4;
+
+  oneof peer_attribute_graph_type {
+    BipartiteGraph bipartite_graph = 3;
+  }
+}
+
+// Configuration to construct a bipartite graph.
+// After forming a bipartite graph of principal nodes and attribute nodes, the
+// bipartite graph projection (folding) is applied to remove attribute nodes and
+// explicitly connect principal nodes with other principal nodes. The weights
+// among principal nodes are set by a random walk transition method based on the
+// weights between principal and attribute nodes.
+message BipartiteGraph {
+  // Configures how to treat edges when traversing the graph.
+  enum TraversalMode {
+    // Error.
+    TM_UNSET = 0;
+
+    // Treats the graph as undirected, ignoring attribute directions if set.
+    // After featurization, "_u" is appended to the attribute name to form the
+    // model's feature name.
+    TM_UNDIRECTED = 1;
+
+    // Presence of the following values in config implies that all attribute
+    // directions are either FORWARD or BACKWARD.
+    // Single traversal for directed graph, following FORWARD attribute
+    // directions. After featurization, "_f" is appended to its name.
+    TM_FORWARD = 2;
+
+    // Single traversal for directed graph, following BACKWARD attribute
+    // directions. After featurization, "_b" is appended to its name.
+    TM_BACKWARD = 3;
+  }
+
+  // After forming a bipartite graph of principal nodes and attribute nodes, the
+  // bipartite graph projection (folding) is applied to remove attribute nodes and
+  // explicitly connect principal nodes with other principal nodes. The weights
+  // among principal nodes are set by a random walk transition method based on the
+  // weights between principal and attribute nodes.
+  // Featurization can use any combination of valid traversal modes.
+  // It generates a separate bipartite graph for each traversal mode.
+  repeated TraversalMode traversal_modes = 1;
+
+  // Discounts contribution from aged attributes by exponential decay.
+  // Applies (1/2)^*((current_time - attribute_time)/half_life)
+  // to the edge weight connected to the attribute.
+  // If current_time < attribute_time (future event), does not apply the weight.
+  // Must be nonnegative. If zero or unset or positive infinity, no age based
+  // decay is applied.
+  // Note: Although setting this value to zero is mathematically equivalent to
+  // ignoring all past attributes, that is not a reasonable default behavior. To
+  // achieve picking only the latest attribute, set EWM_LATEST for
+  // edge_weighting_method.
+  Duration half_life = 2;
+
+  // Currently, we allow only one edge between a pair of principal and an
+  // attribute value (PeerAttribute.value). EdgeWeightingMethod defines
+  // how to set the weight of an edge, for the case when a principal has
+  // multiple Contexts for a given attribute name. Time for each attribute is
+  // extracted from PeerAttribute.time (if unset, uses Context.valid_from).
+  // This enum must be set.
+  // Contact the Facade team if another weighting method is necessary.
+  enum EdgeWeightingMethod {
+    // Error.
+    EWM_UNSPECIFIED = 0;
+
+    // Selects the weight of the latest attribute.
+    EWM_LATEST = 1;
+
+    // Applies a discount by half_life to EWM_LATEST.
+    EWM_DISCOUNTED_LATEST = 2;
+
+    // Sums the recurring attributes with discounted weights, where discounts
+    // are done by half_life. If age-based discounting is not
+    // necessary, set half_life to zero.
+    EWM_SUM_DISCOUNTED = 3;
+
+    // LOG(EWM_SUM_DISCOUNTED + 1). This is useful when some attributes
+    // occur order of magnitude more often than other attributes.
+    EWM_LOG_SUM_DISCOUNTED = 4;
+  }
+
+  EdgeWeightingMethod edge_weighting_method = 3;
+}

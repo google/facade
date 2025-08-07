@@ -1,0 +1,48 @@
+// Copyright 2025 Google Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package facade;
+
+import "protos/duration.proto";
+
+// Configuration for featurizing a Facade action.
+message ActionSourceConfig {
+  // What kind of action to configure (eg, "drive" or "table"). Matched with the
+  // 'type' field in the action proto. Must match [\w\d-_]+.
+  string type = 1;
+
+  // Maximum count of history keys per day. Drops actions with history keys
+  // count more than this threshold * days. Ignore this filter if this is a
+  // non-positive value.
+  int32 max_history_keys_per_day = 2;
+
+  // For a given action, construct historical features using previous actions
+  // that happened during the given duration interval before the given action.
+  Duration history_duration = 3;
+
+  // Ignores historical actions of the same target if actions happened within
+  // this duration interval.
+  Duration action_deduplication_period = 4;
+
+  // Maximum number of distinct feature values per feature name. Must be >0.
+  int32 max_values_per_feature = 5;
+
+  // Minimum number of distinct feature values per feature name. If the number
+  // of distinct values is less than this, the feature is not used. Zero or less
+  // means an empty feature is allowed.
+  // This has no impact on the inference mode.
+  int32 min_values_per_feature = 6;
+}

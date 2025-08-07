@@ -1,0 +1,390 @@
+// Copyright 2025 Google Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+syntax = "proto3";
+
+package facade.internal.model;
+
+// Function that reduces action and context embeddings to a scalar score.
+enum ScoringFunction {
+  SF_UNSPECIFIED = 0;
+
+  // Vanilla inner product.
+  SF_DOT = 1;
+
+  // One Minus DOT: 1 - inner product of two vectors, also called the cosine
+  // distance when the vectors are L2-normalized.
+  SF_OMDOT = 2;
+
+  // The hardmin reduction between embeddings a, b is defined as:
+  // \sum_i \min(a_i, b_i)
+  SF_HARDMIN = 3;
+
+  // Assuming non-negative embeddings a, b, the softmin reduction is defined as:
+  // \sum_i (a_i * b_i)/(a_i + b_i + \epsilon).
+  SF_SOFTMIN = 4;
+}
+
+// Stateless transformations applicable to a rank 2 tensor of embeddings.
+enum Transformation {
+  TR_UNSPECIFIED = 0;
+
+  // No transformation.
+  TR_IDENTITY = 1;
+
+  // Applied pointwise.
+  TR_SIGMOID = 2;
+  TR_SOFTPLUS = 3;
+
+  // Assumes last dimension is embeddings, takes normalization operations on
+  // that dimension.
+  TR_SOFTMAX = 4;
+  TR_L2_NORMALIZED = 5;
+}
+
+// Specifies the network that reduces variable-length segments of possibly
+// weighted tokens into fixed-size embeddings. These are usually applied as
+// the very first layer.
+message SegmentReduction {
+  // Feature name used for tokens in the segment. Must be non-empty.
+  string token_feature_name = 4;
+
+  // Feature name used for intensities in the segment. Optional, if empty then
+  // the tokens are used without weights.
+  string intensity_feature_name = 5;
+
+  enum WeightScaling {
+    WS_UNSPECIFIED = 0;  // Error.
+    WS_IDENTITY = 1;     // x -> x.
+    WS_LOG = 2;          // x -> log(1 + x).
+    WS_UNIFORM = 3;      // x -> 1.
+  }
+
+  // Within segment embedding computation, optionally rescale the individual
+  // tokens weights.
+  WeightScaling segment_weight_scaling = 1;
+
+  // Weight normalization used for aggregating a set of weighted embeddings.
+  // In what follows, (e_i) are the d-dimensional embeddings and (w_i) the
+  // scalar non-negative weights.
+  enum WeightNormalization {
+    WN_UNSPECIFIED = 0;  // Error.
+    WN_L1 = 1;           // (\sum_i w_i * e_i) / (\sum_i w_i),
+    WN_L2 = 2;           // (\sum_i w_i * e_i) / \sqrt(\sum_i w_i^2).
+  }
+
+  // Within segment embedding computation, normalize the final aggregated
+  // embedding by the L1 or L2 norm of the composite atom intensities.
+  WeightNormalization segment_weight_normalization = 2;
+
+  // Which low-level token embeddings to use. If two or more segment reducers
+  // point to the same token_embedding_name, then the weights will be shared.
+  string token_embedding_name = 3;
+}
+
+// Specifies the trivial (identity) network that reads in a fixed number of
+// floats.
+message FixedSizeDenseFeature {
+  string feature_name = 2;
+  int32 size = 1;
+}
+
+// Self-normalizing network. This is a multi-layer, fully connected feedforward
+// network with a Selu activation. See https://arxiv.org/abs/1706.02515.
+message SNN {
+  // Number of units per hidden layers.
+  repeated int32 layer_sizes = 1;
+}
+
+// Specifies the architecture of one tower (either action or context).
+message Architecture {
+  // The "classic" Facade tower architecture. Features are converted to
+  // embeddings which are then concatenated and passed through a SNN to produce
+  // the final embedding.
+  message ConcatenateThenSNN {
+    // Each segment is converted to a fixed-size embedding before concatenation.
+    repeated SegmentReduction segment_reductions = 1;
+    repeated FixedSizeDenseFeature fixed_size_dense_features = 3;
+    SNN snn = 2;
+  }
+
+  oneof architecture {
+    ConcatenateThenSNN concatenate_then_snn = 1;
+  }
+}
+
+message EmbeddingConfig {
+  // If non-positive, adjusts number of dimensions automatically as a function
+  // of the underlying number of tokens.
+  int32 dimensions = 1;
+
+  // The number of out-of-vocabulary indices. If non-positive defaults to 1.
+  int32 num_oov_indices = 2;
+
+  // Conversion rate to out-of-vocabulary indices at training time. Zero
+  // disables the conversion.
+  float oov_dropout_rate = 3;
+}
+
+// The learning rate schedule used to train the model.
+message LearningRateSchedule {
+  // Exponential Decay Learning Rate Schedule. For arguments semantics see
+  // https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/schedules/ExponentialDecay
+  message ExponentialDecay {
+    float initial_learning_rate = 1;
+    float decay_steps = 2;
+
+    // Set to 1.0 to achieve a constant learning rate schedule.
+    float decay_rate = 3;
+    bool staircase = 4;
+  }
+
+  // One Cycle Learning Rate Schedule. For argument semantics see
+  // //model/optimization/one_cycle.py
+  message OneCycle {
+    float peak_learning_rate = 1;
+    float learning_rate_rampup_factor = 2;
+    float learning_rate_rampdown_factor = 3;
+    float rampup = 4;
+
+    enum Interpolation {
+      I_UNSPECIFIED = 0;
+      I_COSINE = 1;
+      I_LINEAR = 2;
+    }
+
+    Interpolation interpolation = 5;
+  }
+
+  oneof schedule {
+    ExponentialDecay exponential_decay = 1;
+    OneCycle one_cycle = 2;
+  }
+}
+
+// The loss function used to train the model.
+message LossFunction {
+  // Configures the pairwise Huber loss function. For arguments semantics see
+  // //model/loss/pairwise_huber.py
+  message PairwiseHuber {
+    float soft_margin = 1;
+    float hard_margin = 2;
+    float norm_push = 3;
+    float lse_scale = 4;
+  }
+
+  // Configures the pointwise generalized logistic loss function. See
+  // //model/loss/generalized_logistic.py
+  message GeneralizedLogistic {
+    float soft_margin = 1;
+    float hard_margin = 2;
+    float negative_push = 3;
+  }
+
+  // Configures the pointwise SANLL loss function. See
+  // //model/loss/sanll.py
+  message Sanll {
+    float margin = 1;
+    float negative_push = 2;
+  }
+
+  // Configures the multi-similarity los function. See
+  // //model/loss/multi_similarity.py
+  message MultiSimilarity {
+    float a = 1;
+    float b = 2;
+    float loc = 3;
+  }
+
+  oneof loss_function {
+    PairwiseHuber pairwise_huber = 1;
+    GeneralizedLogistic generalized_logistic = 2;
+    Sanll sanll = 5;
+    MultiSimilarity multi_similarity = 6;
+  }
+
+  // Apply t -> -log(1 - t) to all scores at training time, before those are fed
+  // to the loss function through the optional linear rescaler. For scoring
+  // functions bounded at 1, such as the cosine distance, this rescaling
+  // compensates for vanishing gradients when the score approaches 1.
+  bool log_rescaler = 4;
+
+  // Defines an optional linear score rescaling layer, applied at training time
+  // to all model scores, right before those are fed to the loss function.
+  message LinearRescalerConfig {
+    // If trainable_offset is true, this value is used for initialization.
+    float offset = 1;
+
+    // If trainable_scale is true, this value is used for initialization.
+    // Must be positive. 1 is a sensible default value.
+    float scale = 2;
+    bool trainable_offset = 3;
+    bool trainable_scale = 4;
+  }
+
+  // Leave unset to disable score rescaling.
+  LinearRescalerConfig linear_rescaler = 3;
+}
+
+// The strategy for generating synthetic positives for training.
+message SyntheticPositivesStrategy {
+  // Randomly create synthetic positives within the current minibatch. For
+  // argument semantics see //model/layers/stateless.py
+  message RandomSampleWithinMinibatch {
+    int32 contrastive_scores_per_query = 1;
+    float positive_instances_weight_factor = 2;
+  }
+
+  oneof strategy {
+    RandomSampleWithinMinibatch random_sample_within_minibatch = 1;
+  }
+}
+
+// TF Optimizer to use at training time.
+message Optimizer {
+  // https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/legacy/SGD
+  message SGD {
+    // If any of the following is non-positive, the default value is used.
+    float momentum = 1;
+    float global_clipnorm = 2;
+  }
+
+  // https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/AdamW
+  // When using Adam, a warm-up period should be used for the learning rate.
+  // See https://arxiv.org/pdf/1910.04209.pdf. This can be achieved with the
+  // linear OneCycle schedule.
+  message AdamW {
+    float weight_decay = 1;  // If negative, default value is used.
+
+    // If any of the following is non-positive, the default value is used.
+    float beta_1 = 2;
+    float beta_2 = 3;
+    float epsilon = 4;
+    float global_clipnorm = 5;
+  }
+
+  oneof optimizer {
+    SGD sgd = 1;
+    AdamW adam_w = 2;
+  }
+}
+
+// Holds hyperparameters that are exclusive to model training.
+message ModelTrainingHyperparameters {
+  // Number of examples per training minibatch.
+  int32 batch_size = 1;
+
+  // Number of training examples to use. The total number of training steps is
+  // computed as `training_examples / batch_size`.
+  int32 training_examples = 2;
+
+  // Dropout rate for segment tokens. Zero disables dropout.
+  float dropout_tokens = 3;
+
+  // Dropout rate for neurons. Zero disables dropout.
+  float dropout_neurons = 4;
+
+  // Optimizer to use.
+  Optimizer optimizer = 5;
+
+  // Learning rate schedule configuration.
+  LearningRateSchedule learning_rate_schedule = 6;
+
+  // Loss function configuration.
+  LossFunction loss_function = 7;
+
+  // Contrastive samples (synthetic positives) generation strategy.
+  SyntheticPositivesStrategy synthetic_positives_strategy = 8;
+
+  // Multiplicative weights for every action particle name.
+  // If `commensirable_scores_across_actions` is false, these are used to
+  // weight the per-action-particle sub-losses. If true, these are used to
+  // weight the individual actions within the combined minibatch.
+  map<string, float> action_name_to_loss_weight = 9;
+
+  // Group all scores, labels and weights across actions before passing them to
+  // the loss function. For pointwise losses, this should mathematically have no
+  // effect for pointwise loss functions but should allow for comparable raw
+  // scores for pairwise losses. May require adjusting action particle loss
+  // weights.
+  bool commensurable_scores_across_actions = 10;
+
+  // Decoupled weight decay. At every step, trainable variables (or
+  // IndexedSlices thereof) that appear in the gradient are decayed by this
+  // factor times the learning rate. See
+  // https://www.tensorflow.org/addons/api_docs/python/tfa/optimizers/extend_with_decoupled_weight_decay
+  float weight_decay = 12;
+
+  // Configures evaluation task. The following does not impact model training
+  // per-se, but instead specifies how model performance is tracked during
+  // training.
+  message Evaluation {
+    // Number of examples in one training epoch. Model checkpointing, training
+    // and evaluation metrics are reported at the end of each training epoch.
+    int32 examples_per_training_epoch = 1;
+
+    // Evaluation batch size. Can be significantly larger than the training
+    // batch size since there is no backwards pass at evaluation time.
+    int32 batch_size = 2;
+
+    // Number of evaluation examples in each evaluation epoch. The number
+    // of evaluation steps per epoch is `examples_per_evaluation_epoch /
+    // batch_size`.
+    int32 examples_per_evaluation_epoch = 3;
+
+    // False positive rate thresholds to compute TPR, partial AUC and raw model
+    // prediction scores at. See //model/metrics/combined.py.
+    repeated float metrics_fpr_thresholds = 4;
+
+    // Defines how evaluation-time only synthetic positives are generated, e.g.,
+    // quantity and weighting of synthetic positives.
+    SyntheticPositivesStrategy.RandomSampleWithinMinibatch synthetic_positives =
+        5;
+  }
+
+  Evaluation evaluation = 11;
+}
+
+// Holds the hyperparameters that fully specify the creation and training of a
+// new Facade model.
+message ModelHyperparameters {
+  // Number of dimensions of the context and action embeddings.
+  int32 embedding_dims = 1;
+
+  // Scoring function for reducing a pair of context and action embeddings
+  // to a scalar score.
+  ScoringFunction scoring_function = 2;
+
+  // Embeddings normalization or activation functions. Applied in sequence
+  // as the very last operations to form the final action/context embeddings.
+  repeated Transformation action_embeddings_transformations = 3;
+  repeated Transformation context_embeddings_transformations = 4;
+
+  // Specifies the input token-level embeddings configuration per
+  // token_embedding_name.
+  map<string, EmbeddingConfig> token_embedding_name_to_config = 5;
+
+  // Feature name in the SequenceConfig used to identify the principal in the
+  // context. This field is only used for computing crossings, and is not
+  // provided to the model as a feature.
+  string principal_feature_name = 9;
+
+  // Specifies the architecture of the context tower.
+  Architecture context_architecture = 6;
+
+  // Specifies the architectures of the towers per-action particle name.
+  map<string, Architecture> action_name_to_architecture = 7;
+
+  // All training-time specific hyperparameters.
+  ModelTrainingHyperparameters training_hyperparameters = 8;
+}
