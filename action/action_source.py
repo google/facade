@@ -71,8 +71,10 @@ class FeaturizationSource:
     """
     config_type = self.config.type
 
+    history_duration = time_utils.convert_proto_duration_to_timedelta(self.config.history_duration)
+    earliest_event = start_time - history_duration
     raw_actions = read_actions(
-        config_type, self.tfrecord_path, start_time, end_time
+        config_type, self.tfrecord_path, earliest_event, end_time
     )
 
     for a in raw_actions:
