@@ -15,8 +15,10 @@
 
 import datetime
 import random
+import time
 from typing import List
 
+from absl import logging
 from action import action_source
 from common.pipeline_type import PipelineType
 from common import time_utils
@@ -50,30 +52,66 @@ def compute_contextualized_actions(
   if pipeline_type != PipelineType.INFERENCE:
     max_num_cas = directive.dataset_parameters.max_num_contextualized_actions_per_principal_snapshot
 
+  logging.info('  Generated %d snapshot times', len(snapshot_times))
+
   # Compute featurized actions per action source.
   actions_per_source = dict()
-  for action_source_config in directive.action_sources:
+  num_action_sources = len(directive.action_sources)
+  for idx, action_source_config in enumerate(directive.action_sources, 1):
+    source_type = action_source_config.type
+    logging.info('  [%d/%d] Processing action source: %s', idx, num_action_sources, source_type)
+    
+    stage_start = time.time()
     source = action_source.FeaturizationSource(
       action_source_config, pipeline_type, action_file_path)
     actions_by_principal = source.get_actions_by_principal(start_time, end_time)
+    
     action_tuples = [(principal, action)
                      for principal, action_list in actions_by_principal.items()
                      for action in action_list]
-    actions_per_source[action_source_config.type] = action_tuples
+    actions_per_source[source_type] = action_tuples
+    
+    stage_elapsed = time.time() - stage_start
+    logging.info('    Featurized %s actions for %s principals in %.0fs',
+                 f'{len(action_tuples):,}',
+                 f'{len(actions_by_principal):,}',
+                 stage_elapsed)
+    del source
 
   # Compute featurized contexts as a single flattened collection.
   contexts_by_source = []
-  for context_source_config in directive.context_sources:
-    contexts_by_source.extend(
-        context_source.get_featurized_context(context_source_config, snapshot_times, context_file_path))
+  num_context_sources = len(directive.context_sources)
+  for idx, context_source_config in enumerate(directive.context_sources, 1):
+    source_type = context_source_config.type
+    logging.info('  [%d/%d] Processing context source: %s', idx, num_context_sources, source_type)
+    
+    stage_start = time.time()
+    contexts = context_source.get_featurized_context(
+        context_source_config, snapshot_times, context_file_path)
+    contexts_by_source.extend(contexts)
+    
+    stage_elapsed = time.time() - stage_start
+    logging.info('    Generated %s featurized contexts in %.0fs',
+                 f'{len(contexts):,}',
+                 stage_elapsed)
 
+  logging.info('  Merging actions and contexts...')
+  merge_start = time.time()
+  
   # Contextualize actions and contexts, and return the result.
-  return merger_pipeline.contextualize_actions(
+  result = merger_pipeline.contextualize_actions(
       contexts_by_source,
       actions_per_source,
       snapshot_times,
       max_num_actions_per_contextualized_actions,
       max_num_cas)
+  
+  merge_elapsed = time.time() - merge_start
+  logging.info('  Created %s contextualized actions in %.0fs',
+               f'{len(result):,}',
+               merge_elapsed)
+  
+  return result
 
 
 def downsample_missing_actions(

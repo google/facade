@@ -18,6 +18,7 @@ import datetime
 import math
 from typing import Dict, List, Tuple, Union, Optional
 
+from common import string_pool
 from protos import timestamp_pb2, contextualized_actions_pb2, action_pb2
 from pipelines.history_featurizer.online_heaviest_items import OnlineHeaviestItems
 
@@ -43,9 +44,11 @@ def get_history_tokens(action: Action) -> List[Tuple[str, WeightedToken]]:
   """Extracts history tokens from an action."""
   if not action.principal:
     return []
+  # Intern the principal bytes to avoid duplicate encodings
+  principal_bytes = string_pool.encode_and_intern(action.principal, 'principal')
   return [(
       K_PRINCIPAL_FEATURE,
-      make_weighted_token(action.principal.encode("utf-8"), 1.0),
+      make_weighted_token(principal_bytes, 1.0),
   )]
 
 
@@ -74,7 +77,9 @@ class HistoryFeaturizer:
       last_seen_segment = self.last_seen[key]
 
       # Temporal deduplication: skips recently seen tokens.
-      lookup_key = token.token.decode("utf-8", "ignore") + ("+" if token.weight > 0 else "-")
+      # Intern the decoded token string to avoid duplicates
+      token_str = string_pool.decode_and_intern(token.token, 'principal')
+      lookup_key = token_str + ("+" if token.weight > 0 else "-")
       if lookup_key in last_seen_segment:
         if (
             last_seen_segment[lookup_key] + self.action_deduplication_period
@@ -82,14 +87,16 @@ class HistoryFeaturizer:
         ):
           continue
       last_seen_segment[lookup_key] = event_time
-      segment.upsert(token.token.decode("utf-8", "ignore"), token.weight)
+      segment.upsert(token_str, token.weight)
 
   def make_tokens(self) -> List[Tuple[str, WeightedToken]]:
     """Creates the list of tokens from the current state."""
     result = []
     for key, segment in self.segments.items():
       for iw in segment.heaviest():
-        result.append((key, make_weighted_token(iw.item.encode("utf-8"), iw.weight)))
+        # Intern the encoded bytes to avoid duplicates
+        item_bytes = string_pool.encode_and_intern(iw.item, 'principal')
+        result.append((key, make_weighted_token(item_bytes, iw.weight)))
     return result
 
 
@@ -246,7 +253,9 @@ def build_history_features(
             bow.tokens.append(token)
 
         if len(bow.tokens) >= min_tokens_per_segment:
-          results[action_to_featurize.id.decode("utf-8", "ignore")] = [feature]
+          # Intern the action ID to avoid duplicate strings
+          action_id = string_pool.decode_and_intern(action_to_featurize.id, 'action_id')
+          results[action_id] = [feature]
 
       elif event_type == 1:  # Accumulate tokens
         featurizer.accumulate(event_time, payload)

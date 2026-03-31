@@ -20,8 +20,10 @@ import datetime
 import math
 from typing import Dict, Iterable, List, Tuple
 
+from common import string_pool
 from common import time_utils
 from context.graph.fold import Edge
+from context.graph.fold import MAX_EDGES_FROM_MIDDLE
 from context.graph.fold import two_hops_random_walk_neighbors
 from protos import context_pb2
 from protos import context_source_config_pb2
@@ -491,7 +493,8 @@ def featurize_context(
   for weight, peer in neighbors:
     peer_name = peer[1].removesuffix(PRINCIPAL_SUFFIX)
     token = weighted_words.tokens.add()
-    token.token = peer_name.encode("utf-8")
+    # Intern the peer name bytes to avoid duplicates
+    token.token = string_pool.encode_and_intern(peer_name, 'principal')
     token.weight = float(weight)
 
   return principal, result
@@ -668,7 +671,9 @@ def featurize_bipartite_peer_attributes(
         graph.extend(edges_to_add)
 
       # Folds the bipartite graph to connect principals to peers.
-      folded_graph = two_hops_random_walk_neighbors(graph, config.max_peers)
+      max_edges = config.bipartite_graph.max_edges_from_middle or MAX_EDGES_FROM_MIDDLE
+      folded_graph = two_hops_random_walk_neighbors(
+          graph, config.max_peers, max_edges_from_middle=max_edges)
 
       # Iterate through the dictionary items (Node, List of neighbors)
       for node, neighbors in folded_graph.items():

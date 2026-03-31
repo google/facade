@@ -161,4 +161,12 @@ message BipartiteGraph {
   }
 
   EdgeWeightingMethod edge_weighting_method = 3;
+
+  // Maximum number of edges to process from middle nodes during graph folding.
+  // Controls memory usage during bipartite graph projection. Lower values reduce
+  // memory consumption but may reduce peer discovery accuracy.
+  // Default: 100 (suitable for most deployments)
+  // Large deployments may benefit from higher values (e.g., 1000) for improved
+  // peer discovery at the cost of increased memory usage.
+  int32 max_edges_from_middle = 4;
 }

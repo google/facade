@@ -18,6 +18,7 @@ import datetime
 from datetime import timedelta
 from typing import Dict, List, Tuple
 
+from common import string_pool
 from common import time_utils
 from common.pipeline_type import PipelineType
 from common.source_data import read_actions
@@ -77,8 +78,10 @@ class FeaturizationSource:
         config_type, self.tfrecord_path, earliest_event, end_time
     )
 
+    # Intern action IDs to avoid storing duplicate strings
     for a in raw_actions:
-      self.action_id_to_action[a.id.decode("utf-8", "ignore")] = a
+      action_id = string_pool.decode_and_intern(a.id, 'action_id')
+      self.action_id_to_action[action_id] = a
 
     # Simplified resource counting
     unique_resources = set(a.resource_id for a in raw_actions)
